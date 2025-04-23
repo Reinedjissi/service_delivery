@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'onbeading_screen.dart';
+import '../splash_screen/onbeading_screen.dart';
 
 // Method to create an image container
 Widget buildImageContainer(

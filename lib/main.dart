@@ -1,8 +1,11 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:service_delivery/app/home/home.dart';
+import 'package:service_delivery/app/users/client/client_home.dart';
 import 'package:service_delivery/firebase_options.dart';
 
-import 'onbeading_screen.dart';
+import 'app/splash_screen/onbeading_screen.dart';
+import 'app/users/admin/dashboad.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,8 +22,8 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Démo Marketplace',
-      home: MyOnboarding(),
+      title: 'Marketplace',
+      home: Dashboard(),
 
     );
   }
