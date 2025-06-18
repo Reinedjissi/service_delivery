@@ -12,6 +12,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  fl_chart: ^0.66.0
   firebase_auth: ^5.3.4
   firebase_core: ^3.9.0
   cloud_firestore: ^5.6.0
@@ -25,8 +26,14 @@ dependencies:
 
 
   cupertino_icons: ^1.0.8
+  flutter_bloc: ^9.1.1
+  equatable: ^2.0.7
 
 dev_dependencies:
+  built_value: ^8.9.5
+  built_collection: ^5.1.1
+  build_runner: ^2.4.13
+  built_value_generator: ^8.9.2
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0

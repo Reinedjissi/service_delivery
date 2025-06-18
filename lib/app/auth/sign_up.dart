@@ -1,11 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:service_delivery/app/auth/login.dart';
-import '../../core/utils/asset_path.dart';
-import '../../core/utils/authentification.dart';
-import '../home/home.dart';
-import '../widgets/TextField.dart';
-import '../widgets/button.dart';
-import 'login.dart';
+import 'package:service_delivery/app/auth/view/Login_page.dart';
+import 'package:service_delivery/app/widgets/button.dart';
+import 'package:service_delivery/core/utils/asset_path.dart';
 
 class SignUp extends StatefulWidget {
   const SignUp({Key? key}) : super(key: key);
@@ -28,6 +24,7 @@ class _SignUpState extends State<SignUp> {
     super.dispose();
   }
 
+/*
   void signUp() async {
     setState(() {
       isLoading = true; // Début du chargement
@@ -42,7 +39,7 @@ class _SignUpState extends State<SignUp> {
     if (res == "Reussit!!!!!") {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (context) => home(),
+          builder: (context) => Hom(),
         ),
       );
     } else {
@@ -53,6 +50,7 @@ class _SignUpState extends State<SignUp> {
       isLoading = false; // Fin du chargement
     });
   }
+*/
 
   @override
   Widget build(BuildContext context) {
@@ -119,7 +117,7 @@ class _SignUpState extends State<SignUp> {
             ),
             const SizedBox(height: 20),
             MyButton(
-              onTab: signUp,
+              onTab: () {},
               text: "Créer",
             ),
             Row(
@@ -135,7 +133,7 @@ class _SignUpState extends State<SignUp> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => Login(),
+                        builder: (context) => LoginPage(),
                       ),
                     );
                   },
@@ -156,6 +154,7 @@ class _SignUpState extends State<SignUp> {
     );
   }
 }
+
 void showSnackBar(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(

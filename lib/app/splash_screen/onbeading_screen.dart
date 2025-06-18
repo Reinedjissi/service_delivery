@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:service_delivery/app/auth/view/Login_page.dart';
 import 'package:service_delivery/core/utils/asset_path.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
-import 'package:service_delivery/app/widgets/container_image.dart';
-import 'package:service_delivery/app/auth/login.dart';
 
 class MyOnboarding extends StatefulWidget {
+  static const String routeName = '/onboarding';
+
   const MyOnboarding({super.key});
 
   @override
@@ -77,9 +78,7 @@ class _MyOnboardingState extends State<MyOnboarding> {
             minimumSize: const Size.fromHeight(70),
           ),
           onPressed: () {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (context) => const Login()),
-            );
+            Navigator.pushReplacementNamed(context, LoginPage.routeName);
           },
           child: const Text(
             "Commencer",
@@ -153,9 +152,9 @@ class _MyOnboardingState extends State<MyOnboarding> {
               width: double.infinity, // Prendre toute la largeur disponible
             ),
           ),
-          SizedBox(height: 20),
-          Text(title, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-          SizedBox(height: 10),
+          const SizedBox(height: 20),
+          Text(title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Text(description, textAlign: TextAlign.center),

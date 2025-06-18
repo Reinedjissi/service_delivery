@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:service_delivery/app/auth/login.dart';
 import 'package:service_delivery/app/auth/sign_up.dart';
-import 'package:service_delivery/core/utils/asset_path.dart';
+import 'package:service_delivery/app/auth/view/Login_page.dart';
 
-class home extends StatefulWidget {
+class HomeView extends StatefulWidget {
   @override
-  _homeState createState() => _homeState();
+  _HomeViewState createState() => _HomeViewState();
 }
 
-class _homeState extends State<home> {
+class _HomeViewState extends State<HomeView> {
   String selectedCategory = 'Toutes';
   String searchQuery = '';
 
@@ -28,13 +27,13 @@ class _homeState extends State<home> {
       categories = ['Toutes', ...fetched];
     });
   }
+
   Future<Map<String, String>> _getCategorieNamesMap() async {
     final snapshot = await FirebaseFirestore.instance.collection('categories').get();
     return {
       for (var doc in snapshot.docs) doc.id: doc['nom'] as String,
     };
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +52,7 @@ class _homeState extends State<home> {
           ),
           SizedBox(width: 8),
           TextButton(
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const Login())),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const LoginPage())),
             child: Text("Connexion", style: TextStyle(color: Colors.black)),
             style: TextButton.styleFrom(
               backgroundColor: Colors.purple.shade50,
@@ -77,7 +76,7 @@ class _homeState extends State<home> {
                 children: [
                   Icon(Icons.person, size: 40, color: Colors.white),
                   SizedBox(height: 10),
-                  Text("Bienvenue 👋", style: TextStyle(color: Colors.white, fontSize: 18)),
+                  Text("Bienvenue", style: TextStyle(color: Colors.white, fontSize: 18)),
                   Text("Veuillez vous connecter", style: TextStyle(color: Colors.white70)),
                 ],
               ),
@@ -89,7 +88,7 @@ class _homeState extends State<home> {
             ListTile(
                 leading: Icon(Icons.login),
                 title: Text('Connexion'),
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const Login()))),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const LoginPage()))),
             Divider(),
             ListTile(
                 leading: Icon(Icons.person_add),
@@ -118,8 +117,7 @@ class _homeState extends State<home> {
                   return Center(child: CircularProgressIndicator());
                 }
 
-
-                final docs = snapshot.data!.docs;
+                final docs = snapshot.data?.docs ?? [];
 
                 return FutureBuilder<Map<String, String>>(
                   future: _getCategorieNamesMap(),
@@ -129,12 +127,14 @@ class _homeState extends State<home> {
                     final catMap = catSnapshot.data!;
                     final services = docs.map((doc) {
                       final data = doc.data() as Map<String, dynamic>;
-                      final titre = data['titre'] ?? '';
-                      final description = data['description'] ?? '';
+                      final titre = data['titre']?.toString() ?? '';
+                      final description = data['description']?.toString() ?? '';
                       final categorieId = data['categorieId'];
                       final note = data['note'] ?? 4.5;
-                      final imageUrl = data['image'] ?? '';
-                      final categoryName = catMap[categorieId] ?? 'Inconnue';
+                      final imageUrl = data['image']?.toString() ?? '';
+                      final categoryName = categorieId != null
+                          ? (catMap[categorieId] ?? 'Inconnue')
+                          : 'Non définie';
 
                       return {
                         'title': titre,
@@ -149,6 +149,7 @@ class _homeState extends State<home> {
                           service['title'].toString().toLowerCase().contains(searchQuery.toLowerCase());
                       return matchCategory && matchSearch;
                     }).toList();
+
                     if (services.isEmpty) {
                       return Padding(
                         padding: const EdgeInsets.all(20),
@@ -162,9 +163,7 @@ class _homeState extends State<home> {
                   },
                 );
               },
-            )
-
-            //SizedBox(height: 30),
+            ),
           ],
         ),
       ),
@@ -247,13 +246,13 @@ class _homeState extends State<home> {
               ? Image.network(service["imageUrl"], width: 60, height: 60, fit: BoxFit.cover)
               : Icon(Icons.image, size: 60),
         ),
-        title: Text(service["title"], style: TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(service["description"]),
+        title: Text(service["title"] ?? '', style: TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text(service["description"] ?? ''),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.star, color: Colors.amber, size: 20),
-            Text(service["rating"].toString()),
+            Text(service["rating"]?.toString() ?? 'N/A'),
           ],
         ),
         onTap: () {
@@ -277,7 +276,6 @@ class _homeState extends State<home> {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Partie gauche : titre + description
                         Expanded(
                           flex: 2,
                           child: Padding(
@@ -285,33 +283,26 @@ class _homeState extends State<home> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(service["title"],
-                                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                                Text(service["title"] ?? '', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                                 SizedBox(height: 8),
-                                Text(service["description"]),
+                                Text(service["description"] ?? ''),
                                 SizedBox(height: 10),
-                                Text("Catégorie : ${service["category"]}"),
+                                Text("Catégorie : ${service["category"] ?? 'N/A'}"),
                                 Row(
                                   children: [
                                     Icon(Icons.star, color: Colors.amber, size: 20),
                                     SizedBox(width: 4),
-                                    Text("Note : ${service["rating"]}/5"),
+                                    Text("Note : ${service["rating"] ?? 'N/A'}/5"),
                                   ],
                                 ),
                               ],
                             ),
                           ),
                         ),
-                        // Partie droite : image
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: service["imageUrl"] != null && service["imageUrl"].toString().startsWith('http')
-                              ? Image.network(
-                            service["imageUrl"],
-                            width: 200,
-                            height: 200,
-                            fit: BoxFit.cover,
-                          )
+                              ? Image.network(service["imageUrl"], width: 200, height: 200, fit: BoxFit.cover)
                               : Icon(Icons.broken_image, size: 100),
                         ),
                       ],
@@ -320,7 +311,6 @@ class _homeState extends State<home> {
                     Divider(),
                     Text("Que veut-tu faire ?", style: TextStyle(fontWeight: FontWeight.bold)),
                     SizedBox(height: 10),
-
                     ElevatedButton.icon(
                       onPressed: () => _showAuthDialog(context, "contacter ce prestataire"),
                       icon: Icon(Icons.message),
@@ -328,7 +318,6 @@ class _homeState extends State<home> {
                       style: ElevatedButton.styleFrom(minimumSize: Size(double.infinity, 48)),
                     ),
                     SizedBox(height: 10),
-
                     ElevatedButton.icon(
                       onPressed: () => _showAuthDialog(context, "commander ce service"),
                       icon: Icon(Icons.shopping_cart),
@@ -336,7 +325,6 @@ class _homeState extends State<home> {
                       style: ElevatedButton.styleFrom(minimumSize: Size(double.infinity, 48)),
                     ),
                     SizedBox(height: 10),
-
                     OutlinedButton.icon(
                       onPressed: () => _showAuthDialog(context, "évaluer ce service"),
                       icon: Icon(Icons.rate_review),
@@ -350,7 +338,6 @@ class _homeState extends State<home> {
             ),
           );
         },
-
       ),
     );
   }
@@ -364,21 +351,15 @@ class _homeState extends State<home> {
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.pop(context); // Fermer le dialog
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const SignUp()),
-              );
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const SignUp()));
             },
             child: Text("Créer un compte"),
           ),
           TextButton(
             onPressed: () {
-              Navigator.pop(context); // Fermer le dialog
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const Login()),
-              );
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const LoginPage()));
             },
             child: Text("Connexion"),
           ),
@@ -386,5 +367,4 @@ class _homeState extends State<home> {
       ),
     );
   }
-
 }
