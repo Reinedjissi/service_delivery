@@ -5,6 +5,7 @@ import 'package:service_delivery/app/users/admin/views/admin_projets.dart';
 import 'package:service_delivery/app/users/admin/views/admin_services.dart';
 import 'package:service_delivery/app/users/admin/views/admin_statistique.dart';
 import 'package:service_delivery/app/users/admin/views/admin_users.dart';
+//import 'package:service_delivery/app/users/admin/views/admin_projets.dart';
 
 class AdminDashboardPage extends StatefulWidget {
   const AdminDashboardPage({Key? key}) : super(key: key);
@@ -129,11 +130,11 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                   () => navigateWithSlide(context, const AdminClients()),
             ),
             buildDashboardCard(
-              "projets",
+              "Marchés",
               userCount,
               Icons.perm_data_setting_outlined,
               Colors.orange,
-                  () => navigateWithSlide(context, const AdminProjets()),
+                  () => navigateWithSlide(context, const ProjetsPage()),
             ),
             buildDashboardCard(
               "statistique",

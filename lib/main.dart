@@ -1,5 +1,6 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:service_delivery/app/auth/sign_up.dart';
 import 'package:service_delivery/app/auth/view/Login_page.dart';
 import 'package:service_delivery/app/home/home_page.dart';
 import 'package:service_delivery/app/home/home_view.dart';
@@ -27,7 +28,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Service Delivery',
-      home: Dashboard(),
+      home: SignUp(),
       routes: routes,
     );
   }

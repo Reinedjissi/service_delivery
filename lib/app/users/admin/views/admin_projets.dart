@@ -1,117 +1,246 @@
-import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
-class AdminProjets extends StatefulWidget {
-  const AdminProjets({super.key});
+class ProjetsPage extends StatefulWidget {
+  const ProjetsPage({super.key});
 
   @override
-  State<AdminProjets> createState() => _AdminProjetsState();
+  State<ProjetsPage> createState() => _ProjetsPageState();
 }
 
-class _AdminProjetsState extends State<AdminProjets> {
+class _ProjetsPageState extends State<ProjetsPage> {
   final CollectionReference projetsRef = FirebaseFirestore.instance.collection('projets');
-  String searchQuery = '';
-  String sortOption = 'Date récente';
-  String? selectedStatusFilter;
-  String? selectedClientFilter;
+  final CollectionReference clientsRef = FirebaseFirestore.instance.collection('clients');
+  final CollectionReference servicesRef = FirebaseFirestore.instance.collection('services');
 
   Map<String, String> clientNomMap = {};
   Map<String, String> serviceNomMap = {};
-  bool isLoading = false;
+  List<QueryDocumentSnapshot> clients = [];
+  List<QueryDocumentSnapshot> services = [];
+  bool isLoading = true;
+  String selectedStatut = 'Tous';
+  String searchQuery = '';
+
+  List<QueryDocumentSnapshot> projets = [];
+  List<QueryDocumentSnapshot> projetsFiltered = [];
+
+  // Contrôleurs pour le formulaire de création
+  final _formKey = GlobalKey<FormState>();
+  final _titreController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _budgetController = TextEditingController();
+  final _commentairesController = TextEditingController();
+  String? _selectedClientId;
+  List<String> _selectedServiceIds = [];
+  String _selectedStatutProjet = 'Nouveau';
+  String _selectedPriorite = 'Normale';
+  double _progression = 0.0;
 
   @override
   void initState() {
     super.initState();
-    _loadClientsAndServices();
-    _initializeFirestoreCollections(); // Nouvelle méthode
+    _loadData();
   }
 
-  // Initialiser les collections Firestore si elles n'existent pas
-  Future<void> _initializeFirestoreCollections() async {
-    try {
-      // Vérifier si la collection projets existe, sinon créer un document exemple
-      final projetsSnapshot = await projetsRef.limit(1).get();
-      if (projetsSnapshot.docs.isEmpty) {
-        await _createInitialProject();
-      }
-    } catch (e) {
-      print('Erreur lors de l\'initialisation: $e');
-    }
+  @override
+  void dispose() {
+    _titreController.dispose();
+    _descriptionController.dispose();
+    _budgetController.dispose();
+    _commentairesController.dispose();
+    super.dispose();
   }
 
-  // Créer un projet initial pour initialiser la collection
-  Future<void> _createInitialProject() async {
-    try {
-      final initialProject = {
-        'titre': 'Projet de démonstration',
-        'description': 'Ceci est un projet de démonstration créé automatiquement pour illustrer le fonctionnement de l\'application.',
-        'clientId': 'demo_client',
-        'serviceId': 'demo_service',
-        'statut': 'Nouveau',
-        'commentaires': 'Projet créé automatiquement lors de l\'initialisation',
-        'documents': [],
-        'dateCreation': Timestamp.now(),
-        'dateLivraison': null,
-        'dateModification': Timestamp.now(),
-        'utilisateurId': 'system',
-        'priorite': 'Normale', // Nouveau champ
-        'budget': 0.0, // Nouveau champ
-        'progression': 0, // Nouveau champ (0-100%)
-      };
+  Future<void> _loadData() async {
+    setState(() => isLoading = true);
 
-      await projetsRef.add(initialProject);
-      print('Projet initial créé avec succès');
+    try {
+      await _loadClientsAndServices();
+      await _loadProjets();
     } catch (e) {
-      print('Erreur lors de la création du projet initial: $e');
+      debugPrint('Erreur lors du chargement des données: $e');
+    } finally {
+      setState(() => isLoading = false);
     }
   }
 
   Future<void> _loadClientsAndServices() async {
+    // Charger les clients
+    final clientsSnapshot = await clientsRef.get();
+    clients = clientsSnapshot.docs;
+    final clientsMap = <String, String>{};
+    for (var doc in clients) {
+      final data = doc.data() as Map<String, dynamic>;
+      clientsMap[doc.id] = '${data['nom'] ?? ''} ${data['prenom'] ?? ''}'.trim();
+    }
+    clientNomMap = clientsMap;
+
+    // Charger les services
+    final servicesSnapshot = await servicesRef.get();
+    services = servicesSnapshot.docs;
+    final servicesMap = <String, String>{};
+    for (var doc in services) {
+      final data = doc.data() as Map<String, dynamic>;
+      servicesMap[doc.id] = data['titre'] ?? 'Service sans titre';
+    }
+    serviceNomMap = servicesMap;
+  }
+
+  Future<void> _loadProjets() async {
+    final snapshot = await projetsRef.orderBy('dateCreation', descending: true).get();
+    projets = snapshot.docs;
+    _applyFilters(); // Appelé après le chargement
+  }
+  void _applyFilters() {
+    projetsFiltered = projets.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+
+      final statut = data['statut'] ?? 'Nouveau';
+      final statutMatch = selectedStatut == 'Tous' || statut == selectedStatut;
+
+      final titre = (data['titre'] ?? '').toString().toLowerCase();
+      final description = (data['description'] ?? '').toString().toLowerCase();
+      final clientNom = clientNomMap[data['clientId']] ?? '';
+
+      final searchMatch = searchQuery.isEmpty ||
+          titre.contains(searchQuery.toLowerCase()) ||
+          description.contains(searchQuery.toLowerCase()) ||
+          clientNom.toLowerCase().contains(searchQuery.toLowerCase());
+
+      return statutMatch && searchMatch;
+    }).toList();
+
+    setState(() {});
+  }
+
+  Future<void> _creerProjet() async {
+    if (!_formKey.currentState!.validate()) return;
+
     try {
-      setState(() => isLoading = true);
+      await projetsRef.add({
+        'titre': _titreController.text.trim(),
+        'description': _descriptionController.text.trim(),
+        'clientId': _selectedClientId,
+        'serviceIds': _selectedServiceIds,
+        'budget': double.tryParse(_budgetController.text) ?? 0.0,
+        'statut': _selectedStatutProjet,
+        'priorite': _selectedPriorite,
+        'progression': _progression,
+        'commentaires': _commentairesController.text.trim(),
+        'dateCreation': Timestamp.now(),
+        'dateModification': Timestamp.now(),
+      });
 
-      // Charger les clients avec gestion d'erreur améliorée
-      try {
-        final clientsSnapshot = await FirebaseFirestore.instance.collection('clients').get();
-        final clientsMap = <String, String>{};
-        for (var doc in clientsSnapshot.docs) {
-          final data = doc.data();
-          clientsMap[doc.id] = '${data['nom'] ?? ''} ${data['prenom'] ?? ''}';
-        }
-        clientNomMap = clientsMap;
-      } catch (e) {
-        print('Erreur lors du chargement des clients: $e');
-        // Créer un client par défaut si la collection n'existe pas
-        clientNomMap = {'demo_client': 'Client Démonstration'};
-      }
+      _resetForm();
+      Navigator.of(context).pop();
+      _loadProjets();
 
-      // Charger les services avec gestion d'erreur améliorée
-      try {
-        final servicesSnapshot = await FirebaseFirestore.instance.collection('services').get();
-        final servicesMap = <String, String>{};
-        for (var doc in servicesSnapshot.docs) {
-          final data = doc.data();
-          servicesMap[doc.id] = data['titre'] ?? 'Service sans titre';
-        }
-        serviceNomMap = servicesMap;
-      } catch (e) {
-        print('Erreur lors du chargement des services: $e');
-        // Créer un service par défaut si la collection n'existe pas
-        serviceNomMap = {'demo_service': 'Service Démonstration'};
-      }
-
-      setState(() => isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Marchés créé avec succès')),
+      );
     } catch (e) {
-      setState(() => isLoading = false);
-      if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur: $e')),
+      );
+    }
+  }
+
+  Future<void> _modifierStatut(String projetId, String nouveauStatut) async {
+    try {
+      await projetsRef.doc(projetId).update({
+        'statut': nouveauStatut,
+        'dateModification': Timestamp.now(),
+      });
+
+      _loadProjets();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Statut mis à jour')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur: $e')),
+      );
+    }
+  }
+
+  Future<void> _supprimerProjet(String projetId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmer la suppression'),
+        content: const Text('Êtes-vous sûr de vouloir supprimer ce Marchés ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Supprimer', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await projetsRef.doc(projetId).delete();
+        _loadProjets();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Erreur lors du chargement: $e")),
+          const SnackBar(content: Text('Marchés supprimé')),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur: $e')),
         );
       }
     }
+  }
+
+  void _resetForm() {
+    _titreController.clear();
+    _descriptionController.clear();
+    _budgetController.clear();
+    _commentairesController.clear();
+    _selectedClientId = null;
+    _selectedServiceIds.clear();
+    _selectedStatutProjet = 'Nouveau';
+    _selectedPriorite = 'Normale';
+    _progression = 0.0;
+  }
+
+  Color _getStatutColor(String statut) {
+    switch (statut) {
+      case 'Nouveau':
+        return Colors.purple;
+      case 'En cours':
+        return Colors.blue;
+      case 'Terminé':
+        return Colors.green;
+      case 'Suspendu':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Color _getPrioriteColor(String priorite) {
+    switch (priorite) {
+      case 'Haute':
+        return Colors.red;
+      case 'Normale':
+        return Colors.orange;
+      case 'Basse':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _formatDate(Timestamp? timestamp) {
+    if (timestamp == null) return 'Non défini';
+    final date = timestamp.toDate();
+    return '${date.day}/${date.month}/${date.year}';
   }
 
   @override
@@ -120,17 +249,20 @@ class _AdminProjetsState extends State<AdminProjets> {
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(12.0),
+        padding: EdgeInsets.all(isMobile ? 8.0 : 16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildHeader(isMobile),
-            const SizedBox(height: 10),
-            _buildSearchField(),
-            const SizedBox(height: 10),
-            _buildFilters(),
-            const SizedBox(height: 10),
-            Expanded(child: _buildProjectsList()),
+            const SizedBox(height: 16),
+            _buildFilters(isMobile),
+            const SizedBox(height: 16),
+            _buildSummary(isMobile),
+            const SizedBox(height: 16),
+            if (isLoading)
+              const Expanded(child: Center(child: CircularProgressIndicator()))
+            else
+              Expanded(child: _buildProjetsList(isMobile)),
           ],
         ),
       ),
@@ -142,1031 +274,946 @@ class _AdminProjetsState extends State<AdminProjets> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Gestion des projets",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
+          const Text(
+            "Gestion des Projets",
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
-              ElevatedButton.icon(
-                onPressed: _showProjetDialog,
-                icon: const Icon(Icons.add),
-                label: const Text("Ajouter"),
-                style: ElevatedButton.styleFrom(
-                  //backgroundColor: Colors.deepPurple[200],
-                  foregroundColor: Colors.deepPurple,
-                ),
-              ),
-             /* const SizedBox(width: 10),
-              ElevatedButton.icon(
-                onPressed: _createTestProject,
-                icon: const Icon(Icons.science),
-                label: const Text("Test"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                ),
-              ),*/
-            ],
-          ),
-        ],
-      );
-    } else {
-      return Row(
-        children: [
-          const Expanded(
-            child: Text("Gestion des projets",
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-          ),
-          /*ElevatedButton.icon(
-            onPressed: _createTestProject,
-            icon: const Icon(Icons.science),
-            label: const Text("Créer projet test"),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-            ),*/
-         // ),
-          const SizedBox(width: 10),
-          ElevatedButton.icon(
-            onPressed: _showProjetDialog,
-            icon: const Icon(Icons.add),
-            label: const Text("Ajouter un projet"),
-            style: ElevatedButton.styleFrom(
-             // backgroundColor: Colors.deepPurple[100],
-              foregroundColor: Colors.deepPurple,
-            ),
-          ),
-        ],
-      );
-    }
-  }
-
-  Widget _buildProjectsList() {
-    if (isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: projetsRef.orderBy('dateCreation', descending: true).snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        if (snapshot.hasError) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.error, size: 50, color: Colors.red),
-                const SizedBox(height: 10),
-                Text("Erreur: ${snapshot.error}"),
-                const SizedBox(height: 10),
-                ElevatedButton(
-                  onPressed: () => setState(() {}),
-                  child: const Text("Réessayer"),
-                ),
-                const SizedBox(height: 10),
-                ElevatedButton(
-                  onPressed: _createInitialProject,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                  child: const Text("Initialiser la base de données"),
-                ),
-              ],
-            ),
-          );
-        }
-
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.folder_open, size: 50, color: Colors.grey),
-                const SizedBox(height: 10),
-                const Text("Aucun projet trouvé", style: TextStyle(fontSize: 16)),
-                const Text("Cliquez sur 'Ajouter' pour créer votre premier projet"),
-                const SizedBox(height: 20),
-                /*ElevatedButton.icon(
-                  onPressed: _createTestProject,
-                  icon: const Icon(Icons.science),
-                  label: const Text("Créer un projet de test"),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                ),*/
-              ],
-            ),
-          );
-        }
-
-        final filtered = _filterAndSortProjects(snapshot.data!.docs);
-
-        return Column(
-          children: [
-            // Statistiques en haut
-            //_buildStatsCard(_getProjectStats(snapshot.data!.docs)),
-            const SizedBox(height: 10),
-            // Liste des projets
-            Expanded(
-              child: ListView.builder(
-                itemCount: filtered.length,
-                itemBuilder: (_, index) => _buildProjectCard(filtered[index]),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  List<QueryDocumentSnapshot> _filterAndSortProjects(List<QueryDocumentSnapshot> docs) {
-    final filtered = docs.where((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      final titre = data['titre']?.toString().toLowerCase() ?? '';
-      final description = data['description']?.toString().toLowerCase() ?? '';
-      final statusMatch = selectedStatusFilter == null ||
-          data['statut'] == selectedStatusFilter;
-      final clientMatch = selectedClientFilter == null ||
-          data['clientId'] == selectedClientFilter;
-
-      return (titre.contains(searchQuery) || description.contains(searchQuery)) &&
-          statusMatch && clientMatch;
-    }).toList();
-
-    filtered.sort((a, b) {
-      final dataA = a.data() as Map<String, dynamic>;
-      final dataB = b.data() as Map<String, dynamic>;
-      switch (sortOption) {
-        case 'A-Z':
-          return (dataA['titre'] ?? '').toString().compareTo((dataB['titre'] ?? '').toString());
-        case 'Z-A':
-          return (dataB['titre'] ?? '').toString().compareTo((dataA['titre'] ?? '').toString());
-        case 'Date récente':
-          final dateA = dataA['dateCreation'] as Timestamp?;
-          final dateB = dataB['dateCreation'] as Timestamp?;
-          if (dateA == null && dateB == null) return 0;
-          if (dateA == null) return 1;
-          if (dateB == null) return -1;
-          return dateB.compareTo(dateA);
-        case 'Date ancienne':
-          final dateA = dataA['dateCreation'] as Timestamp?;
-          final dateB = dataB['dateCreation'] as Timestamp?;
-          if (dateA == null && dateB == null) return 0;
-          if (dateA == null) return 1;
-          if (dateB == null) return -1;
-          return dateA.compareTo(dateB);
-        default:
-          return 0;
-      }
-    });
-
-    return filtered;
-  }
-
-  Widget _buildProjectCard(QueryDocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    final clientNom = clientNomMap[data['clientId']] ?? 'Client inconnu';
-    final serviceNom = serviceNomMap[data['serviceId']] ?? 'Service inconnu';
-    final statut = data['statut'] ?? 'En cours';
-    final dateCreation = data['dateCreation'] as Timestamp?;
-    final progression = data['progression'] ?? 0;
-
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
-      elevation: 2,
-      child: ListTile(
-        leading: _buildStatusIcon(statut),
-        title: Text(data['titre'] ?? 'Projet sans titre',
-            style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(data['description'] ?? 'Aucune description',
-                maxLines: 2, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 4),
-            Text("Client : $clientNom", style: TextStyle(color: Colors.grey[600])),
-            Text("Service : $serviceNom", style: TextStyle(color: Colors.grey[600])),
-            Text("Statut : $statut | Date : ${_formatDate(dateCreation)}",
-                style: TextStyle(color: Colors.grey[600])),
-            // Barre de progression
-            if (progression > 0) ...[
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Text("Progression: $progression%",
-                      style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: LinearProgressIndicator(
-                      value: progression / 100,
-                      backgroundColor: Colors.grey[300],
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        progression < 30 ? Colors.red :
-                        progression < 50 ? Colors.blue :
-                        progression < 70 ? Colors.orange : Colors.green,
-                      ),
-                    ),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _showCreateProjetDialog(),
+                  icon: const Icon(Icons.add, size: 20),
+                  label: const Text('Nouveau', style: TextStyle(fontSize: 14)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: _loadData,
+                icon: const Icon(Icons.refresh),
+                tooltip: 'Actualiser',
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.grey[200],
+                ),
               ),
             ],
-            if (data['commentaires'] != null && data['commentaires'].toString().isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text("Commentaires : ${data['commentaires']}",
-                    style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[600]),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-              ),
-          ],
-        ),
-        isThreeLine: true,
-        trailing: PopupMenuButton<String>(
-          onSelected: (value) {
-            switch (value) {
-              case 'view':
-                _showProjetDetails(doc.id, data);
-                break;
-              case 'edit':
-                _showProjetDialog(docId: doc.id, existingData: data);
-                break;
-              case 'delete':
-                _deleteProjet(doc.id, data['titre'] ?? 'ce projet');
-                break;
-              case 'duplicate':
-                _duplicateProject(data);
-                break;
-            }
-          },
-          itemBuilder: (context) => [
-            const PopupMenuItem(
-              value: 'view',
-              child: Row(
-                children: [
-                  Icon(Icons.visibility, size: 20),
-                  SizedBox(width: 8),
-                  Text('Voir détails'),
-                ],
-              ),
-            ),
-            const PopupMenuItem(
-              value: 'edit',
-              child: Row(
-                children: [
-                  Icon(Icons.edit, size: 20),
-                  SizedBox(width: 8),
-                  Text('Modifier'),
-                ],
-              ),
-            ),
-            const PopupMenuItem(
-              value: 'duplicate',
-              child: Row(
-                children: [
-                  Icon(Icons.copy, size: 20),
-                  SizedBox(width: 8),
-                  Text('Dupliquer'),
-                ],
-              ),
-            ),
-            const PopupMenuItem(
-              value: 'delete',
-              child: Row(
-                children: [
-                  Icon(Icons.delete, color: Colors.red, size: 20),
-                  SizedBox(width: 8),
-                  Text('Supprimer', style: TextStyle(color: Colors.red)),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Nouvelle méthode pour dupliquer un projet
-  Future<void> _duplicateProject(Map<String, dynamic> originalData) async {
-    try {
-      final duplicatedData = Map<String, dynamic>.from(originalData);
-      duplicatedData['titre'] = '${originalData['titre'] ?? 'Projet'} - Copie';
-      duplicatedData['dateCreation'] = Timestamp.now();
-      duplicatedData['dateModification'] = Timestamp.now();
-      duplicatedData['statut'] = 'Nouveau';
-      duplicatedData['progression'] = 0;
-
-      await projetsRef.add(duplicatedData);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Projet dupliqué avec succès"),
-            backgroundColor: Colors.green,
           ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Erreur lors de la duplication: $e"),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Widget _buildStatusIcon(String statut) {
-    IconData icon;
-    Color color;
-
-    switch (statut) {
-      case 'Terminé':
-        icon = Icons.check_circle;
-        color = Colors.green;
-        break;
-      case 'En cours':
-        icon = Icons.access_time;
-        color = Colors.blue;
-        break;
-      case 'Suspendu':
-        icon = Icons.pause_circle;
-        color = Colors.orange;
-        break;
-      case 'Nouveau':
-        icon = Icons.fiber_new;
-        color = Colors.purple;
-        break;
-      default:
-        icon = Icons.work;
-        color = Colors.grey;
+        ],
+      );
     }
 
-    return CircleAvatar(
-      backgroundColor: color.withOpacity(0.1),
-      child: Icon(icon, color: color, size: 20),
-    );
-  }
-
-  String _formatDate(Timestamp? timestamp) {
-    if (timestamp == null) return 'Non définie';
-    final date = timestamp.toDate();
-    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
-  }
-
-  Widget _buildSearchField() {
-    return TextField(
-      decoration: InputDecoration(
-        hintText: 'Rechercher un projet...',
-        prefixIcon: const Icon(Icons.search),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-        filled: true,
-        fillColor: Colors.grey[50],
-      ),
-      onChanged: (val) => setState(() => searchQuery = val.toLowerCase()),
-    );
-  }
-
-  Widget _buildFilters() {
-    return Column(
+    return Row(
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                value: sortOption,
-                decoration: InputDecoration(
-                  labelText: 'Trier par',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
-                onChanged: (val) => setState(() => sortOption = val!),
-                items: [
-                  'Date récente',
-                  'Date ancienne',
-                  'A-Z',
-                  'Z-A',
-                ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: DropdownButtonFormField<String?>(
-                value: selectedStatusFilter,
-                decoration: InputDecoration(
-                  labelText: 'Statut',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
-                onChanged: (val) => setState(() => selectedStatusFilter = val),
-                items: [null, 'Nouveau', 'En cours', 'Terminé', 'Suspendu']
-                    .map((statut) => DropdownMenuItem(
-                    value: statut,
-                    child: Text(statut ?? 'Tous les statuts')
-                )).toList(),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        DropdownButtonFormField<String?>(
-          value: selectedClientFilter,
-          decoration: InputDecoration(
-            labelText: 'Filtrer par client',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        const Expanded(
+          child: Text(
+            "Gestion des Marchés",
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           ),
-          onChanged: (val) => setState(() => selectedClientFilter = val),
-          items: [
-            const DropdownMenuItem(value: null, child: Text("Tous les clients")),
-            ...clientNomMap.entries.map((e) =>
-                DropdownMenuItem(value: e.key, child: Text(e.value))),
-          ],
+        ),
+        ElevatedButton.icon(
+          onPressed: () => _showCreateProjetDialog(),
+          icon: const Icon(Icons.add),
+          label: const Text('Nouveau Marchés'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue,
+            foregroundColor: Colors.white,
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          onPressed: _loadData,
+          icon: const Icon(Icons.refresh),
+          tooltip: 'Actualiser',
         ),
       ],
     );
   }
 
-  Future<void> _deleteProjet(String id, String titre) async {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Supprimer le projet"),
-        content: Text("Êtes-vous sûr de vouloir supprimer '$titre' ? Cette action est irréversible."),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Annuler"),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                await projetsRef.doc(id).delete();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text("Projet supprimé avec succès"),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text("Erreur lors de la suppression: $e"),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              }
-            },
-            child: const Text("Supprimer", style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showProjetDetails(String docId, Map<String, dynamic> data) async {
-    final clientNom = clientNomMap[data['clientId']] ?? 'Client inconnu';
-    final serviceNom = serviceNomMap[data['serviceId']] ?? 'Service inconnu';
-    final dateCreation = data['dateCreation'] as Timestamp?;
-    final dateLivraison = data['dateLivraison'] as Timestamp?;
-
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(data['titre'] ?? 'Détails du projet'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildDetailRow('Client', clientNom),
-              _buildDetailRow('Service', serviceNom),
-              _buildDetailRow('Statut', data['statut'] ?? 'Non défini'),
-              _buildDetailRow('Progression', '${data['progression'] ?? 0}%'),
-              _buildDetailRow('Date de création', _formatDate(dateCreation)),
-              if (dateLivraison != null)
-                _buildDetailRow('Date de livraison', _formatDate(dateLivraison)),
-              _buildDetailRow('Description', data['description'] ?? 'Aucune description'),
-              if (data['commentaires'] != null && data['commentaires'].toString().isNotEmpty)
-                _buildDetailRow('Commentaires', data['commentaires'].toString()),
-              if (data['documents'] != null && (data['documents'] as List).isNotEmpty)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 10),
-                    const Text('Documents:', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ...List.generate((data['documents'] as List).length, (index) {
-                      final doc = data['documents'][index];
-                      return ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.attach_file),
-                        title: Text(doc['nom'] ?? 'Document ${index + 1}'),
-                        trailing: const Icon(Icons.download),
-                      );
-                    }),
-                  ],
-                ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Fermer")),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildFilters(bool isMobile) {
+    if (isMobile) {
+      return Column(
         children: [
-          SizedBox(
-            width: 100,
-            child: Text('$label:', style: const TextStyle(fontWeight: FontWeight.bold)),
+          TextField(
+            decoration: InputDecoration(
+              labelText: 'Rechercher...',
+              hintText: 'Titre, description ou client',
+              prefixIcon: const Icon(Icons.search),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            onChanged: (value) {
+              searchQuery = value;
+              _applyFilters();
+            },
           ),
-          Expanded(child: Text(value)),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: selectedStatut,
+            decoration: InputDecoration(
+              labelText: 'Filtrer par statut',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            onChanged: (val) {
+              selectedStatut = val!;
+              _applyFilters();
+            },
+            items: ['Tous', 'Nouveau', 'En cours', 'Terminé', 'Suspendu']
+                .map((statut) => DropdownMenuItem(value: statut, child: Text(statut)))
+                .toList(),
+          ),
         ],
-      ),
-    );
-  }
-
-  Future<void> _showProjetDialog({String? docId, Map<String, dynamic>? existingData}) async {
-    final formKey = GlobalKey<FormState>();
-    final _titre = TextEditingController(text: existingData?['titre']);
-    final _description = TextEditingController(text: existingData?['description']);
-    final _commentaires = TextEditingController(text: existingData?['commentaires']);
-    String? selectedClientId = existingData?['clientId'];
-    String? selectedServiceId = existingData?['serviceId'];
-    String selectedStatut = existingData?['statut'] ?? 'Nouveau';
-    double progression = (existingData?['progression'] ?? 0).toDouble();
-    DateTime? dateLivraison = existingData?['dateLivraison'] != null
-        ? (existingData!['dateLivraison'] as Timestamp).toDate()
-        : null;
-    List<Map<String, dynamic>> documents = List.from(existingData?['documents'] ?? []);
-    bool isSaving = false;
-
-    await showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-        title: Text(docId == null ? "Ajouter un projet" : "Modifier le projet"),
-        content: SingleChildScrollView(
-        child: Form(
-        key: formKey,
-        child: SizedBox(
-        width: MediaQuery.of(context).size.width * 0.8,
-    child: Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-    TextFormField(
-    controller: _titre,
-    decoration: const InputDecoration(
-    labelText: "Titre du projet *",
-    border: OutlineInputBorder(),
-    ),
-    validator: (value) {
-    if (value == null || value.trim().isEmpty) {
-    return 'Le titre est obligatoire';
+      );
     }
-    return null;
-    },
-    ),
-    const SizedBox(height: 10),
-    TextFormField(
-    controller: _description,
-    decoration: const InputDecoration(
-    labelText: "Description",
-    border: OutlineInputBorder(),
-    ),
-    maxLines: 3,
-    ),
-    const SizedBox(height: 10),
-    // Dropdown Client
-    DropdownButtonFormField<String>(
-    value: selectedClientId,
-    items: clientNomMap.entries.map((entry) {
-    return DropdownMenuItem(
-    value: entry.key,
-    child: Text(entry.value),
-    );
-    }).toList(),
-    onChanged: (val) => setDialogState(() => selectedClientId = val),
-    decoration: const InputDecoration(
-    labelText: "Client *",
-    border: OutlineInputBorder(),
-    ),
-    validator: (val) => val == null ? "Veuillez choisir un client" : null,
-    ),
-    const SizedBox(height: 10),
-    // Dropdown Service
-    DropdownButtonFormField<String>(
-    value: selectedServiceId,
-    items: serviceNomMap.entries.map((entry) {
-    return DropdownMenuItem(
-    value: entry.key,
-    child: Text(entry.value),
-    );
-    }).toList(),
-    onChanged: (val) => setDialogState(() => selectedServiceId = val),
-    decoration: const InputDecoration(
-    labelText: "Service *",
-    border: OutlineInputBorder(),
-    ),
-      validator: (val) => val == null ? "Veuillez choisir un service" : null,
-    ),
-      const SizedBox(height: 10),
-      // Dropdown Statut
-      DropdownButtonFormField<String>(
-        value: selectedStatut,
-        items: ['Nouveau', 'En cours', 'Terminé', 'Suspendu']
-            .map((statut) => DropdownMenuItem(
-          value: statut,
-          child: Text(statut),
-        ))
-            .toList(),
-        onChanged: (val) => setDialogState(() => selectedStatut = val!),
-        decoration: const InputDecoration(
-          labelText: "Statut",
-          border: OutlineInputBorder(),
-        ),
-      ),
-      const SizedBox(height: 10),
-      // Slider pour la progression
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Progression: ${progression.toInt()}%',
-              style: const TextStyle(fontWeight: FontWeight.bold)),
-          Slider(
-            value: progression,
-            min: 0,
-            max: 100,
-            divisions: 20,
-            label: '${progression.toInt()}%',
-            onChanged: (val) => setDialogState(() => progression = val),
-          ),
-        ],
-      ),
-      const SizedBox(height: 10),
-      // Date de livraison
-      Row(
-        children: [
-          Expanded(
-            child: Text(
-              dateLivraison != null
-                  ? 'Date de livraison: ${_formatDate(Timestamp.fromDate(dateLivraison!))}'
-                  : 'Aucune date de livraison',
+
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            decoration: InputDecoration(
+              labelText: 'Rechercher...',
+              hintText: 'Titre, description ou client',
+              prefixIcon: const Icon(Icons.search),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
             ),
-          ),
-          TextButton(
-            onPressed: () async {
-              final selectedDate = await showDatePicker(
-                context: context,
-                initialDate: dateLivraison ?? DateTime.now(),
-                firstDate: DateTime(2020),
-                lastDate: DateTime(2030),
-              );
-              if (selectedDate != null) {
-                setDialogState(() => dateLivraison = selectedDate);
-              }
+            onChanged: (value) {
+              searchQuery = value;
+              _applyFilters();
             },
-            child: const Text('Choisir date'),
           ),
-          if (dateLivraison != null)
-            IconButton(
-              onPressed: () => setDialogState(() => dateLivraison = null),
-              icon: const Icon(Icons.clear),
-              tooltip: 'Supprimer la date',
-            ),
-        ],
-      ),
-      const SizedBox(height: 10),
-      TextFormField(
-        controller: _commentaires,
-        decoration: const InputDecoration(
-          labelText: "Commentaires",
-          border: OutlineInputBorder(),
         ),
-        maxLines: 2,
-      ),
-      const SizedBox(height: 10),
-      // Section Documents
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+        const SizedBox(width: 16),
+        SizedBox(
+          width: 150,
+          child: DropdownButtonFormField<String>(
+            value: selectedStatut,
+            decoration: InputDecoration(
+              labelText: 'Statut',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            onChanged: (val) {
+              selectedStatut = val!;
+              _applyFilters();
+            },
+            items: ['Tous', 'Nouveau', 'En cours', 'Terminé', 'Suspendu']
+                .map((statut) => DropdownMenuItem(value: statut, child: Text(statut)))
+                .toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSummary(bool isMobile) {
+    final total = projetsFiltered.length;
+    final nouveaux = projetsFiltered.where((p) => (p.data() as Map)['statut'] == 'Nouveau').length;
+    final enCours = projetsFiltered.where((p) => (p.data() as Map)['statut'] == 'En cours').length;
+    final termines = projetsFiltered.where((p) => (p.data() as Map)['statut'] == 'Terminé').length;
+    final suspendus = projetsFiltered.where((p) => (p.data() as Map)['statut'] == 'Suspendu').length;
+
+    if (isMobile) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
             children: [
-              const Text('Documents:', style: TextStyle(fontWeight: FontWeight.bold)),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => _ajouterDocument(setDialogState, documents),
-                icon: const Icon(Icons.add),
-                label: const Text('Ajouter'),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildSummaryItem('Total', total.toString(), Colors.blue, true),
+                  _buildSummaryItem('Nouveaux', nouveaux.toString(), Colors.purple, true),
+                  _buildSummaryItem('En cours', enCours.toString(), Colors.orange, true),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildSummaryItem('Terminés', termines.toString(), Colors.green, true),
+                  _buildSummaryItem('Suspendus', suspendus.toString(), Colors.red, true),
+                  const SizedBox(width: 50), // Espace vide pour l'alignement
+                ],
               ),
             ],
           ),
-          if (documents.isNotEmpty)
-            ...documents.asMap().entries.map((entry) {
-              final index = entry.key;
-              final doc = entry.value;
-              return ListTile(
-                dense: true,
-                leading: const Icon(Icons.attach_file),
-                title: Text(doc['nom'] ?? 'Document ${index + 1}'),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red),
-                  onPressed: () {
-                    setDialogState(() => documents.removeAt(index));
-                  },
-                ),
-              );
-            }).toList(),
-        ],
-      ),
-    ],
-    ),
         ),
-        ),
-        ),
-          actions: [
-            TextButton(
-              onPressed: isSaving ? null : () => Navigator.pop(context),
-              child: const Text("Annuler"),
-            ),
-            ElevatedButton(
-              onPressed: isSaving
-                  ? null
-                  : () async {
-                if (formKey.currentState!.validate()) {
-                  setDialogState(() => isSaving = true);
-                  try {
-                    final projetData = {
-                      'titre': _titre.text.trim(),
-                      'description': _description.text.trim(),
-                      'clientId': selectedClientId!,
-                      'serviceId': selectedServiceId!,
-                      'statut': selectedStatut,
-                      'progression': progression.toInt(),
-                      'commentaires': _commentaires.text.trim(),
-                      'documents': documents,
-                      'dateLivraison': dateLivraison != null ? Timestamp.fromDate(dateLivraison!) : null,
-                      'dateModification': Timestamp.now(),
-                    };
+      );
+    }
 
-                    if (docId == null) {
-                      projetData['dateCreation'] = Timestamp.now();
-                      projetData['utilisateurId'] = 'current_user'; // À adapter selon votre système d'auth
-                      await projetsRef.add(projetData);
-                    } else {
-                      await projetsRef.doc(docId).update(projetData);
-                    }
-
-                    Navigator.pop(context);
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(docId == null
-                              ? "Projet ajouté avec succès"
-                              : "Projet modifié avec succès"),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    }
-                  } catch (e) {
-                    setDialogState(() => isSaving = false);
-                    if (mounted && context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text("Erreur: $e"),
-                          backgroundColor: Colors.red,
-                        ),
-                      );
-                    }
-                  }
-                }
-              },
-              child: isSaving
-                  ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-                  : Text(docId == null ? "Ajouter" : "Modifier"),
-            ),
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildSummaryItem('Total', total.toString(), Colors.blue, false),
+            _buildSummaryItem('Nouveaux', nouveaux.toString(), Colors.purple, false),
+            _buildSummaryItem('En cours', enCours.toString(), Colors.orange, false),
+            _buildSummaryItem('Terminés', termines.toString(), Colors.green, false),
+            _buildSummaryItem('Suspendus', suspendus.toString(), Colors.red, false),
           ],
         ),
-        ),
+      ),
     );
   }
 
-  Future<void> _ajouterDocument(StateSetter setDialogState, List<Map<String, dynamic>> documents) async {
-    try {
-      final ImagePicker picker = ImagePicker();
-      final XFile? file = await picker.pickImage(source: ImageSource.gallery);
-
-      if (file != null) {
-        final bytes = await file.readAsBytes();
-        final fileName = file.name;
-
-        // Simuler l'upload - dans un vrai projet, vous uploaderiez vers Firebase Storage
-        final documentData = {
-          'nom': fileName,
-          'taille': bytes.length,
-          'type': file.mimeType ?? 'unknown',
-          'url': 'temp_url_$fileName', // URL temporaire
-          'dateAjout': Timestamp.now(),
-        };
-
-        setDialogState(() {
-          documents.add(documentData);
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Erreur lors de l'ajout du document: $e"),
-            backgroundColor: Colors.red,
+  Widget _buildSummaryItem(String label, String value, Color color, bool isMobile) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: isMobile ? 16 : 20,
+            fontWeight: FontWeight.bold,
+            color: color,
           ),
-        );
-      }
-    }
+        ),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: isMobile ? 10 : 12,
+            color: Colors.grey,
+          ),
+        ),
+      ],
+    );
   }
 
- /* Future<void> _createTestProject() async {
-    final testProjects = [
-      {
-        'titre': 'Site Web E-commerce',
-        'description': 'Développement d\'un site e-commerce avec système de paiement intégré',
-        'clientId': clientNomMap.keys.first,
-        'serviceId': serviceNomMap.keys.first,
-        'statut': 'En cours',
-        'progression': 65,
-        'commentaires': 'Le client souhaite ajouter une fonctionnalité de chat en direct',
-        'documents': [],
-        'dateCreation': Timestamp.now(),
-        'dateLivraison': Timestamp.fromDate(DateTime.now().add(const Duration(days: 30))),
-        'dateModification': Timestamp.now(),
-        'utilisateurId': 'test_user',
-        'priorite': 'Haute',
-        'budget': 5000.0,
-      },
-      {
-        'titre': 'Application Mobile',
-        'description': 'Application mobile pour la gestion des commandes',
-        'clientId': clientNomMap.keys.first,
-        'serviceId': serviceNomMap.keys.first,
-        'statut': 'Nouveau',
-        'progression': 0,
-        'commentaires': 'Première réunion prévue la semaine prochaine',
-        'documents': [],
-        'dateCreation': Timestamp.now(),
-        'dateLivraison': null,
-        'dateModification': Timestamp.now(),
-        'utilisateurId': 'test_user',
-        'priorite': 'Normale',
-        'budget': 8000.0,
-      },
-      {
-        'titre': 'Refonte Logo',
-        'description': 'Création d\'une nouvelle identité visuelle complète',
-        'clientId': clientNomMap.keys.first,
-        'serviceId': serviceNomMap.keys.first,
-        'statut': 'Terminé',
-        'progression': 100,
-        'commentaires': 'Projet livré avec succès, client très satisfait',
-        'documents': [],
-        'dateCreation': Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 15))),
-        'dateLivraison': Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 2))),
-        'dateModification': Timestamp.now(),
-        'utilisateurId': 'test_user',
-        'priorite': 'Faible',
-        'budget': 1500.0,
-      },
-    ];
-
-    try {
-      for (final project in testProjects) {
-        await projetsRef.add(project);
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Projets de test créés avec succès"),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Erreur lors de la création des projets de test: $e"),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }*/
-
-  Map<String, int> _getProjectStats(List<QueryDocumentSnapshot> docs) {
-    final stats = <String, int>{
-      'total': docs.length,
-      'nouveau': 0,
-      'en_cours': 0,
-      'termine': 0,
-      'suspendu': 0,
-    };
-
-    for (final doc in docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final statut = data['statut']?.toString().toLowerCase() ?? '';
-
-      switch (statut) {
-        case 'nouveau':
-          stats['nouveau'] = stats['nouveau']! + 1;
-          break;
-        case 'en cours':
-          stats['en_cours'] = stats['en_cours']! + 1;
-          break;
-        case 'terminé':
-          stats['termine'] = stats['termine']! + 1;
-          break;
-        case 'suspendu':
-          stats['suspendu'] = stats['suspendu']! + 1;
-          break;
-      }
+  Widget _buildProjetsList(bool isMobile) {
+    if (projetsFiltered.isEmpty) {
+      return const Center(
+        child: Text(
+          'Aucun Marchés trouvé',
+          style: TextStyle(fontSize: 16, color: Colors.grey),
+        ),
+      );
     }
 
-    return stats;
+    return ListView.builder(
+      itemCount: projetsFiltered.length,
+      itemBuilder: (context, index) {
+        final doc = projetsFiltered[index];
+        final data = doc.data() as Map<String, dynamic>;
+
+        if (isMobile) {
+          return _buildMobileProjetCard(doc, data);
+        }
+
+        return _buildDesktopProjetCard(doc, data);
+      },
+    );
   }
 
-  /*Widget _buildStatsCard(Map<String, int> stats) {
+  Widget _buildMobileProjetCard(QueryDocumentSnapshot doc, Map<String, dynamic> data) {
     return Card(
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: () => _showProjetDetailsDialog(doc, data),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      data['titre'] ?? 'Sans titre',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _getStatutColor(data['statut'] ?? 'Nouveau'),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      data['statut'] ?? 'Nouveau',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Client: ${clientNomMap[data['clientId']] ?? 'Non défini'}',
+                style: const TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Créé: ${_formatDate(data['dateCreation'])}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              if (data['progression'] != null) ...[
+                const SizedBox(height: 8),
+                LinearProgressIndicator(
+                  value: (data['progression'] as num).toDouble() / 100,
+                  backgroundColor: Colors.grey[300],
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    _getStatutColor(data['statut'] ?? 'Nouveau'),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Progression: ${data['progression']}%',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    onPressed: () => _showStatutMenu(context, doc.id),
+                    icon: const Icon(Icons.edit, size: 20),
+                    tooltip: 'Changer statut',
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.blue[50],
+                      foregroundColor: Colors.blue,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () => _supprimerProjet(doc.id),
+                    icon: const Icon(Icons.delete, size: 20),
+                    tooltip: 'Supprimer',
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.red[50],
+                      foregroundColor: Colors.red,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopProjetCard(QueryDocumentSnapshot doc, Map<String, dynamic> data) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ExpansionTile(
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                data['titre'] ?? 'Sans titre',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _getStatutColor(data['statut'] ?? 'Nouveau'),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                data['statut'] ?? 'Nouveau',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Statistiques des projets',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 20,
-              runSpacing: 10,
-              children: [
-                _buildStatChip('Total', stats['total']!, Colors.blue),
-                _buildStatChip('Nouveau', stats['nouveau']!, Colors.purple),
-                _buildStatChip('En cours', stats['en_cours']!, Colors.orange),
-                _buildStatChip('Terminé', stats['termine']!, Colors.green),
-                _buildStatChip('Suspendu', stats['suspendu']!, Colors.red),
-              ],
-            ),
+            Text('Client: ${clientNomMap[data['clientId']] ?? 'Non défini'}'),
+            Text('Créé: ${_formatDate(data['dateCreation'])}'),
+            if (data['progression'] != null)
+              LinearProgressIndicator(
+                value: (data['progression'] as num).toDouble() / 100,
+                backgroundColor: Colors.grey[300],
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  _getStatutColor(data['statut'] ?? 'Nouveau'),
+                ),
+              ),
           ],
         ),
-      ),
-    );
-  }*/
-
-  Widget _buildStatChip(String label, int count, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            '$label: $count',
-            style: TextStyle(
-              color: color.withOpacity(0.8),
-              fontWeight: FontWeight.w600,
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (data['description'] != null && data['description'].isNotEmpty)
+                  Text('Description: ${data['description']}'),
+
+                if (data['serviceIds'] != null && (data['serviceIds'] as List).isNotEmpty)
+                  Text('Services: ${(data['serviceIds'] as List).map((id) => serviceNomMap[id] ?? 'Inconnu').join(', ')}'),
+
+                if (data['budget'] != null)
+                  Text('Budget: ${data['budget']} FCFA'),
+
+                if (data['priorite'] != null)
+                  Row(
+                    children: [
+                      const Text('Priorité: '),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _getPrioriteColor(data['priorite']),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          data['priorite'],
+                          style: const TextStyle(color: Colors.white, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                if (data['progression'] != null)
+                  Text('Progression: ${data['progression']}%'),
+
+                if (data['commentaires'] != null && data['commentaires'].isNotEmpty)
+                  Text('Commentaires: ${data['commentaires']}'),
+
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    PopupMenuButton<String>(
+                      child: ElevatedButton.icon(
+                        onPressed: null,
+                        icon: const Icon(Icons.edit),
+                        label: const Text('Changer statut'),
+                      ),
+                      onSelected: (newStatut) => _modifierStatut(doc.id, newStatut),
+                      itemBuilder: (context) => [
+                        'Nouveau',
+                        'En cours',
+                        'Terminé',
+                        'Suspendu'
+                      ].map((statut) => PopupMenuItem(
+                        value: statut,
+                        child: Text(statut),
+                      )).toList(),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: () => _supprimerProjet(doc.id),
+                      icon: const Icon(Icons.delete),
+                      label: const Text('Supprimer'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showStatutMenu(BuildContext context, String projetId) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              'Changer le statut',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+          ),
+          ...['Nouveau', 'En cours', 'Terminé', 'Suspendu'].map((statut) =>
+              ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: _getStatutColor(statut),
+                  radius: 8,
+                ),
+                title: Text(statut),
+                onTap: () {
+                  Navigator.pop(context);
+                  _modifierStatut(projetId, statut);
+                },
+              ),
+          ).toList(),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  void _showProjetDetailsDialog(QueryDocumentSnapshot doc, Map<String, dynamic> data) {
+    showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+            title: Text(data['titre'] ?? 'Sans titre'),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (data['description'] != null && data['description'].isNotEmpty) ...[
+                    const Text('Description:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text(data['description']),
+                    const SizedBox(height: 12),
+                  ],
+
+                  Text('Client: ${clientNomMap[data['clientId']] ?? 'Non défini'}'),
+                  const SizedBox(height: 8),
+
+                  if (data['serviceIds'] != null && (data['serviceIds'] as List).isNotEmpty) ...[
+                    const Text('Services:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text((data['serviceIds'] as List).map((id) => serviceNomMap[id] ?? 'Inconnu').join(', ')),
+                    const SizedBox(height: 8),
+                  ],
+
+                  if (data['budget'] != null) ...[
+                    Text('Budget: ${data['budget']} FCFA'),
+                    const SizedBox(height: 8),
+                  ],
+
+                  Row(
+                    children: [
+                      const Text('Statut: '),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _getStatutColor(data['statut'] ?? 'Nouveau'),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          data['statut'] ?? 'Nouveau',
+                          style: const TextStyle(color: Colors.white, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  if (data['priorite'] != null) ...[
+                    Row(
+                      children: [
+                        const Text('Priorité: '),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _getPrioriteColor(data['priorite']),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            data['priorite'],
+                            style: const TextStyle(color: Colors.white, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+
+                  if (data['progression'] != null) ...[
+                    Text('Progression: ${data['progression']}%'),
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      value: (data['progression'] as num).toDouble() / 100,
+                      backgroundColor: Colors.grey[300],
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        _getStatutColor(data['statut'] ?? 'Nouveau'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+
+                  if (data['commentaires'] != null && data['commentaires'].isNotEmpty) ...[
+                    const Text('Commentaires:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text(data['commentaires']),
+                    const SizedBox(height: 8),
+                  ],
+
+                  Text('Créé: ${_formatDate(data['dateCreation'])}'),
+                  if (data['dateModification'] != null)
+                    Text('Modifié: ${_formatDate(data['dateModification'])}'),
+                ],
+              ),
+            ),
+            actions: [
+            TextButton(
+            onPressed: () => Navigator.pop(context),
+    child: const Text('Fermer'),
+    ),
+    TextButton(
+    onPressed: () {
+    Navigator.pop(context);
+    _showStatutMenu(context, doc.id);
+    },
+      child: const Text('Changer statut'),
+    ),
+            ],
+        ),
+    );
+  }
+
+  void _showCreateProjetDialog() {
+    _resetForm();
+    final isMobile = MediaQuery.of(context).size.width < 600;
+
+    if (isMobile) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => _MobileCreateProjetPage(
+            formKey: _formKey,
+            titreController: _titreController,
+            descriptionController: _descriptionController,
+            budgetController: _budgetController,
+            commentairesController: _commentairesController,
+            clients: clients,
+            services: services,
+            selectedClientId: _selectedClientId,
+            selectedServiceIds: _selectedServiceIds,
+            selectedPriorite: _selectedPriorite,
+            onClientChanged: (value) => setState(() => _selectedClientId = value),
+            onServiceChanged: (serviceId, isSelected) => setState(() {
+              if (isSelected) {
+                _selectedServiceIds.add(serviceId);
+              } else {
+                _selectedServiceIds.remove(serviceId);
+              }
+            }),
+            onPrioriteChanged: (value) => setState(() => _selectedPriorite = value!),
+            onSubmit: _creerProjet,
+          ),
+        ),
+      );
+    } else {
+      _showDesktopCreateProjetDialog();
+    }
+  }
+
+  void _showDesktopCreateProjetDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Créer un nouveau Marchés'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: _titreController,
+                    decoration: const InputDecoration(labelText: 'Titre *'),
+                    validator: (value) => value?.isEmpty == true ? 'Champ obligatoire' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _descriptionController,
+                    decoration: const InputDecoration(labelText: 'Description'),
+                    maxLines: 3,
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    value: _selectedClientId,
+                    decoration: const InputDecoration(labelText: 'Client *'),
+                    validator: (value) => value == null ? 'Champ obligatoire' : null,
+                    onChanged: (value) => setState(() => _selectedClientId = value),
+                    items: clients.map((client) {
+                      final data = client.data() as Map<String, dynamic>;
+                      return DropdownMenuItem(
+                        value: client.id,
+                        child: Text('${data['nom']} ${data['prenom']}'),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  StatefulBuilder(
+                    builder: (context, setDialogState) => Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Services *'),
+                        ...services.map((service) {
+                          final data = service.data() as Map<String, dynamic>;
+                          return CheckboxListTile(
+                            title: Text(data['titre']),
+                            value: _selectedServiceIds.contains(service.id),
+                            onChanged: (checked) {
+                              setDialogState(() {
+                                if (checked == true) {
+                                  if (!_selectedServiceIds.contains(service.id)) {
+                                    _selectedServiceIds.add(service.id);
+                                  }
+                                } else {
+                                  _selectedServiceIds.remove(service.id);
+                                }
+                              });
+                              setState(() {}); // Synchronise l'état global
+                            },
+                          );
+                        }).toList(),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _budgetController,
+                    decoration: const InputDecoration(labelText: 'Budget (FCFA)'),
+                    keyboardType: TextInputType.number,
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    value: _selectedPriorite,
+                    decoration: const InputDecoration(labelText: 'Priorité'),
+                    onChanged: (value) => setState(() => _selectedPriorite = value!),
+                    items: ['Haute', 'Normale', 'Basse']
+                        .map((priorite) => DropdownMenuItem(value: priorite, child: Text(priorite)))
+                        .toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _commentairesController,
+                    decoration: const InputDecoration(labelText: 'Commentaires'),
+                    maxLines: 2,
+                  ),
+                  const SizedBox(height: 16),
+                  Slider(
+                    value: _progression,
+                    min: 0,
+                    max: 100,
+                    divisions: 100,
+                    label: '${_progression.round()}%',
+                    onChanged: (value) => setState(() => _progression = value),
+                  ),
+                  Text('Progression: ${_progression.round()}%'),
+                ],
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+          ElevatedButton(
+            onPressed: _creerProjet,
+            child: const Text('Créer'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileCreateProjetPage extends StatefulWidget {
+  final GlobalKey<FormState> formKey;
+  final TextEditingController titreController;
+  final TextEditingController descriptionController;
+  final TextEditingController budgetController;
+  final TextEditingController commentairesController;
+  final List<QueryDocumentSnapshot> clients;
+  final List<QueryDocumentSnapshot> services;
+  final String? selectedClientId;
+  final List<String> selectedServiceIds;
+  final String selectedPriorite;
+  final Function(String?) onClientChanged;
+  final Function(String, bool) onServiceChanged;
+  final Function(String?) onPrioriteChanged;
+  final VoidCallback onSubmit;
+
+  const _MobileCreateProjetPage({
+    required this.formKey,
+    required this.titreController,
+    required this.descriptionController,
+    required this.budgetController,
+    required this.commentairesController,
+    required this.clients,
+    required this.services,
+    required this.selectedClientId,
+    required this.selectedServiceIds,
+    required this.selectedPriorite,
+    required this.onClientChanged,
+    required this.onServiceChanged,
+    required this.onPrioriteChanged,
+    required this.onSubmit,
+  });
+
+  @override
+  State<_MobileCreateProjetPage> createState() => _MobileCreateProjetPageState();
+}
+
+class _MobileCreateProjetPageState extends State<_MobileCreateProjetPage> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Nouveau Projet'),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+        actions: [
+          TextButton(
+            onPressed: () {
+              if (widget.formKey.currentState!.validate()) {
+                widget.onSubmit();
+              }
+            },
+            child: const Text(
+              'Créer',
+              style: TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+      body: Form(
+        key: widget.formKey,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextFormField(
+                controller: widget.titreController,
+                decoration: const InputDecoration(
+                  labelText: 'Titre *',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) =>
+                value?.isEmpty == true
+                    ? 'Champ obligatoire'
+                    : null,
+              ),
+              const SizedBox(height: 16),
+
+              TextFormField(
+                controller: widget.descriptionController,
+                decoration: const InputDecoration(
+                  labelText: 'Description',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 3,
+              ),
+              const SizedBox(height: 16),
+
+              DropdownButtonFormField<String>(
+                value: widget.selectedClientId,
+                decoration: const InputDecoration(
+                  labelText: 'Client *',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) =>
+                value == null
+                    ? 'Champ obligatoire'
+                    : null,
+                onChanged: widget.onClientChanged,
+                items: widget.clients.map((client) {
+                  final data = client.data() as Map<String, dynamic>;
+                  return DropdownMenuItem(
+                    value: client.id,
+                    child: Text('${data['nom']} ${data['prenom']}'),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+
+              const Text(
+                'Services *',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                child: Column(
+                  children: widget.services.map((service) {
+                    final data = service.data() as Map<String, dynamic>;
+                    return CheckboxListTile(
+                      title: Text(data['titre']),
+                      value: widget.selectedServiceIds.contains(service.id),
+                      onChanged: (checked) {
+                        widget.onServiceChanged(service.id, checked == true);
+                      },
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              TextFormField(
+                controller: widget.budgetController,
+                decoration: const InputDecoration(
+                  labelText: 'Budget (FCFA)',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+
+              DropdownButtonFormField<String>(
+                value: widget.selectedPriorite,
+                decoration: const InputDecoration(
+                  labelText: 'Priorité',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: widget.onPrioriteChanged,
+                items: ['Haute', 'Normale', 'Basse']
+                    .map((priorite) =>
+                    DropdownMenuItem(value: priorite, child: Text(priorite)))
+                    .toList(),
+              ),
+              const SizedBox(height: 16),
+
+              TextFormField(
+                controller: widget.commentairesController,
+                decoration: const InputDecoration(
+                  labelText: 'Commentaires',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 3,
+              ),
+              const SizedBox(height: 32),
+
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    if (widget.formKey.currentState!.validate()) {
+                      widget.onSubmit();
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  child: const Text(
+                    'Créer le Marchés',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

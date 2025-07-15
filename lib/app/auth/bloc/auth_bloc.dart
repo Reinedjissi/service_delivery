@@ -9,47 +9,48 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   AuthBloc()
       : _authService = AuthRepository(),
         super(AuthInitialState()) {
-    on((event, emit) => emit(AuthLoading()));
+    // Correction : spécifier le type d'événement pour le handler générique
+    on<AuthEvent>((event, emit) => emit(AuthLoading()));
     on<LoginButtonPressedEvent>(_signInWithEmailAndPassword);
     on<SignUpButtonPressedEvent>(_signUpUser);
     on<LogOutButtonPressedEvent>(_logOutUser);
   }
 
-  Future<void> _signInWithEmailAndPassword(
-    LoginButtonPressedEvent event,
-    Emitter<AuthState> emitter,
-  ) async {
+  Future<void> _signInWithEmailAndPassword(LoginButtonPressedEvent event,
+      Emitter<AuthState> emit,
+      // Correction : paramètre nommé 'emit' au lieu de 'emitter'
+      ) async {
     try {
       await _authService.signInWithEmailAndPassword(
           email: event.email, password: event.password);
-      emitter(AuthLoadingSuccess());
+      emit(
+          AuthLoadingSuccess()); // Correction : utiliser 'emit' au lieu de 'emitter'
     } catch (e) {
-      emitter(AuthLoadingFailure(errorMessage: e.toString()));
+      emit(AuthLoadingFailure(errorMessage: e.toString()));
     }
   }
 
-  Future<void> _signUpUser(
-    SignUpButtonPressedEvent event,
-    Emitter<AuthState> emitter,
-  ) async {
+  Future<void> _signUpUser(SignUpButtonPressedEvent event,
+      Emitter<AuthState> emit, // Correction : paramètre nommé 'emit'
+      ) async {
     try {
       await _authService.createUserWithEmailAndPassword(
           email: event.email, password: event.password);
-      emitter(AuthLoadingSuccess());
+      emit(AuthLoadingSuccess()); // Correction : utiliser 'emit'
     } catch (e) {
-      emitter(AuthLoadingFailure(errorMessage: e.toString()));
+      // emit(AuthLoadingFailure(errorMessage: e.toString()));
     }
   }
 
-  Future<void> _logOutUser(
-    LogOutButtonPressedEvent event,
-    Emitter<AuthState> emitter,
-  ) async {
+  Future<void> _logOutUser(LogOutButtonPressedEvent event,
+      Emitter<AuthState> emit, // Correction : paramètre nommé 'emit'
+      ) async {
     try {
-      _authService.signOut();
-      emitter(AuthLoadingSuccess());
+      await _authService.signOut(); // Correction : ajouter 'await'
+      emit(AuthLoadingSuccess()); // Correction : utiliser 'emit'
     } catch (e) {
-      emitter(AuthLoadingFailure(errorMessage: e.toString()));
+      emit(AuthLoadingFailure(errorMessage: e.toString()));
+      //emit(AuthLoadingFailure(errorMessage: e.toString()));
     }
   }
 }
