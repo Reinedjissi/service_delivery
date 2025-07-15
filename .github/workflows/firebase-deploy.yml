@@ -1,0 +1,29 @@
+name: Deploy to Firebase
+
+on:
+  push:
+    branches:
+      - main  # Changez le nom de la branche si nécessaire
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'  # Vous pouvez spécifier la version que vous utilisez
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Log in to Firebase
+        run: echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" > ${{ github.workspace }}/firebase-key.json
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Deploy to Firebase
+        run: firebase deploy --token "$(cat ${{ github.workspace }}/firebase-key.json | jq -r .token)"
